@@ -9,11 +9,14 @@ struct SpacePayload: Codable {
     let createdAt: String
     let createdAtDisplay: String
     let generator: String
+    let userName: String
+    let assistantName: String
     let clips: [SpaceClip]
 }
 
 struct SpaceClip: Codable {
     let index: Int
+    let role: String          // "user" | "assistant"
     let timestamp: String
     let timeDisplay: String
     let sourceApp: String
@@ -85,14 +88,17 @@ enum SpaceHTMLGenerator {
     // MARK: Public entry points
 
     /// 生成空间文件并写入导出目录，返回结果信息。
-    static func writeSpace(clips: [ClipItem], title: String, exportDirectory: URL, now: Date = Date()) throws -> SpaceExportResult {
+    static func writeSpace(clips: [ClipItem], title: String, exportDirectory: URL,
+                           userName: String = SpeakerNames.defaultUser,
+                           assistantName: String = SpeakerNames.defaultAssistant,
+                           now: Date = Date()) throws -> SpaceExportResult {
         guard !clips.isEmpty else { throw SpaceGeneratorError.noClips }
         do {
             try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
         } catch {
             throw SpaceGeneratorError.cannotCreateDirectory(exportDirectory.path)
         }
-        let built = buildHTML(clips: clips, title: title, now: now)
+        let built = buildHTML(clips: clips, title: title, userName: userName, assistantName: assistantName, now: now)
         let url = uniqueURL(in: exportDirectory, baseName: fileBaseName(title: title, now: now), ext: "html")
         let data = Data(built.html.utf8)
         try data.write(to: url, options: .atomic)
@@ -104,7 +110,10 @@ enum SpaceHTMLGenerator {
     }
 
     /// 纯函数：生成完整 HTML 字符串。
-    static func buildHTML(clips: [ClipItem], title: String, now: Date = Date()) -> (html: String, attachmentCount: Int, skippedCount: Int) {
+    static func buildHTML(clips: [ClipItem], title: String,
+                          userName: String = SpeakerNames.defaultUser,
+                          assistantName: String = SpeakerNames.defaultAssistant,
+                          now: Date = Date()) -> (html: String, attachmentCount: Int, skippedCount: Int) {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayTitle = trimmedTitle.isEmpty ? "GrokClip 空间 · \(Formatters.dateTime.string(from: now))" : trimmedTitle
 
@@ -123,6 +132,7 @@ enum SpaceHTMLGenerator {
                 atts.append(built)
             }
             spaceClips.append(SpaceClip(index: i + 1,
+                                        role: clip.role.rawValue,
                                         timestamp: iso.string(from: clip.timestamp),
                                         timeDisplay: Formatters.dateTime.string(from: clip.timestamp),
                                         sourceApp: clip.sourceApp,
@@ -130,11 +140,13 @@ enum SpaceHTMLGenerator {
                                         attachments: atts))
         }
 
-        let payload = SpacePayload(version: 1,
+        let payload = SpacePayload(version: 2,
                                    title: displayTitle,
                                    createdAt: iso.string(from: now),
                                    createdAtDisplay: Formatters.dateTime.string(from: now),
-                                   generator: "GrokClip Space 1.0",
+                                   generator: "GrokClip Space 0.2.0",
+                                   userName: SpeakerNames.clean(userName, fallback: SpeakerNames.defaultUser),
+                                   assistantName: SpeakerNames.clean(assistantName, fallback: SpeakerNames.defaultAssistant),
                                    clips: spaceClips)
         let json = encodePayloadForScriptTag(payload)
 
@@ -279,6 +291,7 @@ enum SpaceHTMLGenerator {
   --bg:#f7f5f0;--panel:#ffffff;--panel-2:#fbfaf7;--text:#1f1d1a;--muted:#7a756c;--line:#e8e3d9;
   --accent:#5b4bdb;--accent-2:#8b5cf6;--accent-soft:rgba(91,75,219,.09);--code-bg:#f3f0ea;--code-text:#2b2722;
   --ok:#16a34a;--shadow:0 1px 2px rgba(31,29,26,.04),0 6px 24px rgba(31,29,26,.06);
+  --me:#12a150;--me-bubble:#e7f7ec;--me-line:#c4e9d0;
   --radius:14px;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
   --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   color-scheme:light;
@@ -287,6 +300,7 @@ enum SpaceHTMLGenerator {
   --bg:#141416;--panel:#1c1c20;--panel-2:#212126;--text:#ecebe8;--muted:#9a978f;--line:#2e2e34;
   --accent:#8b7cf6;--accent-2:#a78bfa;--accent-soft:rgba(139,124,246,.14);--code-bg:#111114;--code-text:#e6e3dc;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35);color-scheme:dark;
+  --me:#34c26f;--me-bubble:#17301f;--me-line:#24503a;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:84px}
@@ -318,7 +332,27 @@ a{color:var(--accent)}
 .toc .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all}
 .pill{font-size:11px;padding:0 7px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--muted);flex:none;line-height:18px}
 .stream{display:flex;flex-direction:column;gap:22px;min-width:0}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;scroll-margin-top:90px}
+.msg{display:flex;gap:12px;align-items:flex-start;min-width:0;scroll-margin-top:90px}
+.msg.from-user{flex-direction:row-reverse}
+.avatar{width:38px;height:38px;border-radius:12px;flex:none;display:grid;place-items:center;font-weight:700;font-size:15px;color:#fff;margin-top:2px;box-shadow:0 3px 10px rgba(31,29,26,.12);overflow:hidden}
+.avatar.ai{background:linear-gradient(135deg,#4f46e5,#8b5cf6)}
+.avatar.me{background:linear-gradient(135deg,#22c55e,#0f9f4f)}
+.msg-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start}
+.from-user .msg-col{align-items:flex-end}
+.who{display:flex;gap:8px;align-items:baseline;font-size:12.5px;color:var(--muted);margin:0 4px 6px;max-width:100%}
+.from-user .who{flex-direction:row-reverse}
+.who b{color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.role-tag{font-size:11px;padding:0 7px;border-radius:999px;line-height:18px;border:1px solid var(--line)}
+.from-user .role-tag{color:var(--me);border-color:var(--me-line)}
+.from-assistant .role-tag{color:var(--accent);border-color:var(--accent-soft)}
+.from-assistant .card{width:100%;border-top-left-radius:4px}
+.from-user .card{max-width:min(640px,100%);background:var(--me-bubble);border-color:var(--me-line);border-top-right-radius:4px}
+.from-user .card-head{background:transparent;border-bottom-color:var(--me-line)}
+.from-user .badge{background:linear-gradient(135deg,#22c55e,#0f9f4f)}
+.toc .ri{width:18px;height:18px;border-radius:6px;flex:none;display:grid;place-items:center;font-size:10.5px;font-weight:700;color:#fff;margin-top:1px;overflow:hidden}
+.toc .ri.ai{background:linear-gradient(135deg,#4f46e5,#8b5cf6)}
+.toc .ri.me{background:linear-gradient(135deg,#22c55e,#0f9f4f)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;scroll-margin-top:90px;min-width:0}
 .card-head{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel-2);flex-wrap:wrap}
 .badge{font:700 12px var(--mono);color:#fff;background:linear-gradient(135deg,#4f46e5,#8b5cf6);padding:2px 9px;border-radius:7px}
 .meta{font-size:12.5px;color:var(--muted);flex:1;min-width:120px}
@@ -388,8 +422,10 @@ a{color:var(--accent)}
   .topbar-inner{padding:10px 16px}
   .card-body{padding:14px 16px}
   .side-label{display:none}
+  .avatar{width:30px;height:30px;font-size:13px;border-radius:10px}
+  .msg{gap:8px}
 }
-@media print{.topbar,.sidebar,.card-tools,.att-actions{display:none}.layout{display:block}.card{break-inside:avoid;box-shadow:none}}
+@media print{.topbar,.sidebar,.card-tools,.att-actions{display:none}.msg{break-inside:avoid}.layout{display:block}.card{break-inside:avoid;box-shadow:none}}
 </style>
 </head>
 <body>
@@ -648,10 +684,28 @@ function previewLine(raw) {
 function joinRaw(clips, sep) {
   return clips.map(function (c) { return c.rawContent || ''; }).filter(function (t) { return t.length > 0; }).join(sep);
 }
+function roleOf(c) { return c && c.role === 'user' ? 'user' : 'assistant'; }
+function cleanName(name, fallback) {
+  var n = String(name == null ? '' : name).replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  return n ? Array.from(n).slice(0, 24).join('') : fallback;
+}
+function speakerNames(p) {
+  p = p || {};
+  return { user: cleanName(p.userName, '我'), assistant: cleanName(p.assistantName, 'Grok Bot') };
+}
+function speakerOf(c, names) { return roleOf(c) === 'user' ? names.user : names.assistant; }
+function initialOf(name) { var a = Array.from(String(name || '').trim()); return a.length ? a[0].toUpperCase() : '?'; }
+// 复制 / 下载时给每段加说话人前缀：**我：** / **Grok Bot：**
+function joinLabeled(clips, sep, names) {
+  return clips.filter(function (c) { return (c.rawContent || '').length > 0; }).map(function (c) {
+    return '**' + speakerOf(c, names) + '：**\n\n' + c.rawContent;
+  }).join(sep);
+}
 // @@PURE_END
 
 var GC = { escapeHtml: escapeHtml, renderMarkdown: renderMarkdown, renderInline: renderInline, isSafeUrl: isSafeUrl,
-  base64ToBytes: base64ToBytes, humanSize: humanSize, previewLine: previewLine, joinRaw: joinRaw };
+  base64ToBytes: base64ToBytes, humanSize: humanSize, previewLine: previewLine, joinRaw: joinRaw,
+  roleOf: roleOf, speakerNames: speakerNames, joinLabeled: joinLabeled, initialOf: initialOf };
 if (typeof window !== 'undefined') window.__GrokClip = GC;
 if (typeof document === 'undefined') return;
 
@@ -659,6 +713,7 @@ var payload;
 try { payload = JSON.parse(document.getElementById('grokclip-payload').textContent || '{}'); }
 catch (e) { payload = { title: '空间数据损坏', clips: [] }; }
 var clips = Array.isArray(payload.clips) ? payload.clips : [];
+var names = speakerNames(payload);
 var blobCache = {};
 var lbCurrent = null;
 var $ = function (id) { return document.getElementById(id); };
@@ -766,27 +821,35 @@ function render() {
   clips.forEach(function (c, ci) {
     (c.attachments || []).forEach(function (a, ai) { a.__key = ci + '_' + ai; attTotal++; });
   });
+  var askCount = clips.filter(function (c) { return roleOf(c) === 'user'; }).length;
   $('space-meta').textContent = (payload.createdAtDisplay ? '创建于 ' + payload.createdAtDisplay + ' · ' : '') +
-    clips.length + ' 段对话原文 · ' + attTotal + ' 个附件';
+    clips.length + ' 段对话原文（' + askCount + ' 问 · ' + (clips.length - askCount) + ' 答）· ' + attTotal + ' 个附件';
 
   var toc = [], cards = [];
   clips.forEach(function (c, ci) {
     var num = '#' + pad2(c.index || ci + 1);
     var anchor = 'clip-' + pad2(c.index || ci + 1);
     var atts = c.attachments || [];
+    var isUser = roleOf(c) === 'user';
+    var who = speakerOf(c, names);
+    var av = isUser ? 'me' : 'ai';
     var label = previewLine(c.rawContent) || (atts.length ? '📎 ' + atts[0].name : '（空）');
-    toc.push('<a href="#' + anchor + '" data-anchor="' + anchor + '"><span class="num">' + num + '</span><span class="txt">' + escapeHtml(label) +
+    toc.push('<a href="#' + anchor + '" data-anchor="' + anchor + '" class="toc-' + (isUser ? 'user' : 'assistant') + '"><span class="num">' + num +
+      '</span><span class="ri ' + av + '" title="' + escapeHtml(who) + '">' + escapeHtml(initialOf(who)) + '</span><span class="txt">' + escapeHtml(label) +
       '</span>' + (atts.length ? '<span class="pill">📎 ' + atts.length + '</span>' : '') + '</a>');
     var raw = c.rawContent || '';
     var body = raw.length
       ? '<div class="md">' + renderMarkdown(raw) + '</div><pre class="raw">' + escapeHtml(raw) + '</pre>'
       : '<div class="empty-note">（仅附件，无文本原文）</div>';
     var attHtml = atts.length ? '<div class="atts">' + atts.map(function (a, ai) { return renderAttachment(a, ci, ai); }).join('') + '</div>' : '';
-    cards.push('<article class="card" id="' + anchor + '" data-ci="' + ci + '"><div class="card-head"><span class="badge">' + num +
-      '</span><span class="meta">' + escapeHtml(c.timeDisplay || '') + (c.sourceApp ? ' · ' + escapeHtml(c.sourceApp) : '') +
-      (raw.length ? ' · ' + raw.length + ' 字' : '') + '</span><span class="card-tools">' +
+    cards.push('<section class="msg from-' + (isUser ? 'user' : 'assistant') + '" id="' + anchor + '" data-role="' + (isUser ? 'user' : 'assistant') + '">' +
+      '<div class="avatar ' + av + '" aria-hidden="true">' + (isUser ? escapeHtml(initialOf(who)) : '✦') + '</div><div class="msg-col">' +
+      '<div class="who"><b>' + escapeHtml(who) + '</b><span class="role-tag">' + (isUser ? '提问' : '回复') + '</span><span>' + escapeHtml(c.timeDisplay || '') + '</span></div>' +
+      '<article class="card" data-ci="' + ci + '"><div class="card-head"><span class="badge">' + num +
+      '</span><span class="meta">' + (c.sourceApp ? escapeHtml(c.sourceApp) : '') +
+      (raw.length ? (c.sourceApp ? ' · ' : '') + raw.length + ' 字' : '') + '</span><span class="card-tools">' +
       (raw.length ? '<button class="btn-mini" data-action="toggle-raw" data-ci="' + ci + '">原文</button><button class="btn-mini" data-action="copy-raw" data-ci="' + ci + '">复制原文</button>' : '') +
-      '</span></div><div class="card-body">' + body + attHtml + '</div></article>');
+      '</span></div><div class="card-body">' + body + attHtml + '</div></article></div></section>');
   });
   $('toc').innerHTML = toc.join('') || '<div class="empty-note" style="padding:8px 10px">空</div>';
   $('stream').innerHTML = cards.join('') || '<div class="card"><div class="card-body empty-note">这个空间里还没有内容。</div></div>';
@@ -805,7 +868,7 @@ function observeActive() {
       }
     });
   }, { rootMargin: '-90px 0px -65% 0px' });
-  Array.prototype.forEach.call(document.querySelectorAll('.card[id]'), function (c) { io.observe(c); });
+  Array.prototype.forEach.call(document.querySelectorAll('.msg[id]'), function (c) { io.observe(c); });
 }
 
 function applyTheme(theme) {
@@ -837,8 +900,8 @@ document.addEventListener('click', function (ev) {
   var ci = parseInt(el.getAttribute('data-ci'), 10), ai = parseInt(el.getAttribute('data-ai'), 10);
   var att = isNaN(ai) ? null : attAt(ci, ai);
   switch (action) {
-    case 'copy-all': copyText(joinRaw(clips, '\n\n'), '已复制全部纯原文'); break;
-    case 'download-md': downloadText(joinRaw(clips, '\n\n---\n\n'), fileSafe(payload.title) + '.md', 'text/markdown;charset=utf-8'); toast('已开始下载 .md'); break;
+    case 'copy-all': copyText(joinLabeled(clips, '\n\n', names), '已复制全部原文（含提问/回复标记）'); break;
+    case 'download-md': downloadText('# ' + (payload.title || 'GrokClip') + '\n\n' + joinLabeled(clips, '\n\n---\n\n', names), fileSafe(payload.title) + '.md', 'text/markdown;charset=utf-8'); toast('已开始下载 .md'); break;
     case 'toggle-theme':
       var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       applyTheme(next); try { localStorage.setItem('grokclip-theme', next); } catch (e) {}

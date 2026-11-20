@@ -258,7 +258,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch event {
         case .captured(let index, let autoAttached):
             orbView.pulse()
-            showToast(autoAttached > 0 ? "+1 已收录 #\(String(format: "%02d", index)) · 📎 \(autoAttached)" : "+1 已收录 #\(String(format: "%02d", index))")
+            let roleLabel = (store.items.last?.role == .user) ? "提问" : "回复"
+            let base = "+1 已收录 #\(String(format: "%02d", index)) · \(roleLabel)"
+            showToast(autoAttached > 0 ? "\(base) · 📎 \(autoAttached)" : base)
         case .attached(let name, let count):
             orbView.pulse()
             showToast(count > 1 ? "📎 已挂载 \(name) 等 \(count) 个文件" : "📎 已挂载 \(name)")
