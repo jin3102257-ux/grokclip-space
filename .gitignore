@@ -1,0 +1,36 @@
+# 构建产物（每个人在自己 Mac 上本地编译，不提交二进制）
+build/
+*.app
+*.icns
+*.iconset/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 生成的空间与个人数据，绝不提交
+GrokSpace_*.html
+*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].html
+clips_store.json
+settings.json
+ui_state.json
+instance.lock
+error.log
+error.log.1
+.tmp-*.json
+
+# 测试产物
+*.swift.html
+space_python.html
+crossplatform/tests/*.png
+
+# 系统与编辑器杂项
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.vscode/
+.idea/
+xcuserdata/
