@@ -629,6 +629,9 @@ struct ClipCardView: View {
                                                 Color(red: 0.55, green: 0.36, blue: 0.96)],
                                        startPoint: .leading, endPoint: .trailing),
                         in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                RoleChip(role: item.role, name: store.speakerName(for: item.role)) {
+                    store.toggleRole(item.id)
+                }
                 Text(Formatters.time.string(from: item.timestamp))
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundColor(.secondary)
@@ -705,6 +708,36 @@ struct ClipCardView: View {
     }
 }
 
+/// 说话人标记：「我 · 提问」绿色 /「Grok Bot · 回复」紫色，点击切换并立即保存。
+struct RoleChip: View {
+    let role: ClipRole
+    let name: String
+    let action: () -> Void
+
+    private var tint: Color {
+        role == .user ? Color(red: 0.07, green: 0.63, blue: 0.31) : Color(red: 0.36, green: 0.29, blue: 0.86)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: role == .user ? "person.fill" : "sparkles")
+                    .font(.system(size: 8.5, weight: .bold))
+                Text(role == .user ? "\(name) · 提问" : "\(name) · 回复")
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundColor(tint)
+            .padding(.horizontal, 6).padding(.vertical, 1.5)
+            .background(tint.opacity(0.13), in: Capsule())
+            .overlay(Capsule().stroke(tint.opacity(0.35), lineWidth: 0.8))
+            .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .help(role == .user ? "当前标记为「提问」，点击改为 Grok 回复" : "当前标记为「回复」，点击改为我的提问")
+    }
+}
+
 /// 从拖拽 provider 中解析文件 URL，在主线程回调。
 func loadFileURLs(from providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {
     final class Collector { var urls: [URL] = [] }
@@ -735,9 +768,28 @@ func loadFileURLs(from providers: [NSItemProvider], completion: @escaping ([URL]
 
 struct SettingsPopover: View {
     @ObservedObject var store: ClipStore
+    @State private var userName: String = ""
+    @State private var assistantName: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Text("说话人名称（仅保存在本机）").font(.system(size: 12, weight: .semibold))
+            HStack(spacing: 6) {
+                Text("提问方").font(.system(size: 11)).frame(width: 44, alignment: .leading)
+                TextField(SpeakerNames.defaultUser, text: $userName, onCommit: commitNames)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 11))
+            }
+            HStack(spacing: 6) {
+                Text("回复方").font(.system(size: 11)).frame(width: 44, alignment: .leading)
+                TextField(SpeakerNames.defaultAssistant, text: $assistantName, onCommit: commitNames)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 11))
+            }
+            Text("收录时会自动判断提问/回复，猜错了点条目上的标记即可切换。")
+                .font(.system(size: 10.5)).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
             Text("监听目录").font(.system(size: 12, weight: .semibold))
             Text("新文件落地后，会自动挂到前后 \(Int(store.settings.autoAttachWindowSeconds)) 秒内收录的原文下。")
                 .font(.system(size: 10.5)).foregroundColor(.secondary)
@@ -791,6 +843,15 @@ struct SettingsPopover: View {
         }
         .padding(14)
         .frame(width: 300)
+        .onAppear {
+            userName = store.settings.userDisplayName
+            assistantName = store.settings.assistantDisplayName
+        }
+        .onDisappear(perform: commitNames)
+    }
+
+    private func commitNames() {
+        store.setSpeakerNames(user: userName, assistant: assistantName)
     }
 
     private func abbreviate(_ path: String) -> String {

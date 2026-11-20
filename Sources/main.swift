@@ -67,11 +67,36 @@ enum SelfTest {
             \u{2028}行分隔符\u{2029}段分隔符
             """
 
+            // 0) 说话人启发式
+            let roleCases: [(String, ClipRole)] = [
+                ("帮我把这份发布会方案再精简一下", .user),
+                ("这个预算合理吗", .user),
+                ("How should we split the budget?", .user),
+                ("海报的主色调用什么比较好？", .user),
+                ("好的，已经按你的要求改好了。", .assistant),
+                ("# 方案\n\n- 第一步\n- 第二步", .assistant),
+                ("```js\nconsole.log(1)\n```", .assistant),
+                ("", .assistant),
+                (String(repeating: "很长的回复内容。", count: 40), .assistant),
+            ]
+            for (text, expected) in roleCases where ClipRole.detect(text) != expected {
+                return fail("角色判断错误：\(text.prefix(20)) → \(ClipRole.detect(text).rawValue)")
+            }
+            // 旧版存储（无 role 字段）兼容
+            let legacy = #"[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","timestamp":"2026-01-01T08:00:00Z","sourceApp":"Grok Bot","rawContent":"x","contentHash":"h","attachments":[],"isSelected":true}]"#
+            let legacyItems = try Persistence.makeDecoder().decode([ClipItem].self, from: Data(legacy.utf8))
+            guard legacyItems.first?.role == .assistant else { return fail("旧版存储未默认为 assistant") }
+            let roundTrip = try Persistence.makeDecoder().decode([ClipItem].self,
+                from: Persistence.makeEncoder().encode([ClipItem(sourceApp: "t", rawContent: "q", role: .user)]))
+            guard roundTrip.first?.role == .user else { return fail("role 持久化往返失败") }
+
             let items = [
+                ClipItem(sourceApp: "Grok Bot", rawContent: "帮我写一份发布会筹备清单？", role: .user),
                 ClipItem(sourceApp: "Grok Bot", rawContent: clip1, attachments: [ClipAttachment(path: pngURL.path)]),
                 ClipItem(sourceApp: "Grok Bot", rawContent: clip2, attachments: [ClipAttachment(path: txtURL.path)]),
             ]
-            let built = SpaceHTMLGenerator.buildHTML(clips: items, title: "GrokClip 自检空间")
+            let built = SpaceHTMLGenerator.buildHTML(clips: items, title: "GrokClip 自检空间",
+                                                     userName: "小明</b><script>", assistantName: "")
             let html = built.html
 
             // 1) 只允许出现 2 个真正的 </script>（JSON 数据块 + 应用脚本）
@@ -85,15 +110,19 @@ enum SelfTest {
             }
             let json = String(html[start.upperBound..<end.lowerBound])
             let payload = try JSONDecoder().decode(SpacePayload.self, from: Data(json.utf8))
-            guard payload.clips.count == 2,
-                  payload.clips[0].rawContent == clip1,
-                  payload.clips[1].rawContent == clip2 else { return fail("原文往返不一致") }
-            guard payload.clips[0].attachments.first?.kind == "image",
-                  payload.clips[0].attachments.first?.embedded == true,
-                  let b64 = payload.clips[0].attachments.first?.base64,
+            guard payload.clips.count == 3,
+                  payload.clips[1].rawContent == clip1,
+                  payload.clips[2].rawContent == clip2 else { return fail("原文往返不一致") }
+            guard payload.clips.map({ $0.role }) == ["user", "assistant", "assistant"],
+                  payload.userName == "小明</b><script>", payload.assistantName == "Grok Bot" else {
+                return fail("说话人信息未写入空间")
+            }
+            guard payload.clips[1].attachments.first?.kind == "image",
+                  payload.clips[1].attachments.first?.embedded == true,
+                  let b64 = payload.clips[1].attachments.first?.base64,
                   Data(base64Encoded: b64) == png else { return fail("图片附件内嵌失败") }
-            guard payload.clips[1].attachments.first?.kind == "text",
-                  payload.clips[1].attachments.first?.textPreview?.contains("</script>") == true else {
+            guard payload.clips[2].attachments.first?.kind == "text",
+                  payload.clips[2].attachments.first?.textPreview?.contains("</script>") == true else {
                 return fail("文本附件预览失败")
             }
 

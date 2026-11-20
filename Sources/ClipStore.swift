@@ -78,7 +78,7 @@ final class ClipStore: ObservableObject {
         if let li = latestItemIndex, items[li].contentHash == hash {
             return // 与最近一条完全相同：去重
         }
-        var item = ClipItem(sourceApp: sourceApp, rawContent: text)
+        var item = ClipItem(sourceApp: sourceApp, rawContent: text, role: ClipRole.detect(text))
         // 反向认领：文本到来时，把最近 N 秒内落地的文件挂到这条原文下
         prunePending()
         let window = settings.autoAttachWindowSeconds
@@ -225,6 +225,31 @@ final class ClipStore: ObservableObject {
         saveItems()
     }
 
+    func toggleRole(_ id: UUID) {
+        guard let idx = index(of: id) else { return }
+        items[idx].role = items[idx].role.toggled
+        saveItems()
+    }
+
+    func setRole(_ id: UUID, _ role: ClipRole) {
+        guard let idx = index(of: id), items[idx].role != role else { return }
+        items[idx].role = role
+        saveItems()
+    }
+
+    func speakerName(for role: ClipRole) -> String {
+        role == .user ? settings.userDisplayName : settings.assistantDisplayName
+    }
+
+    func setSpeakerNames(user: String, assistant: String) {
+        let u = SpeakerNames.clean(user, fallback: SpeakerNames.defaultUser)
+        let a = SpeakerNames.clean(assistant, fallback: SpeakerNames.defaultAssistant)
+        guard u != settings.userDisplayName || a != settings.assistantDisplayName else { return }
+        settings.userDisplayName = u
+        settings.assistantDisplayName = a
+        saveSettings()
+    }
+
     func setAllSelected(_ value: Bool) {
         for i in items.indices { items[i].isSelected = value }
         saveItems()
@@ -259,7 +284,10 @@ final class ClipStore: ObservableObject {
     // MARK: Output
 
     func joinedRawText(of clips: [ClipItem], separator: String = "\n\n") -> String {
-        clips.map { $0.rawContent }.filter { !$0.isEmpty }.joined(separator: separator)
+        // 每段加说话人前缀，转发出去也能分清谁问谁答
+        clips.filter { !$0.rawContent.isEmpty }
+            .map { "**\(speakerName(for: $0.role))：**\n\n\($0.rawContent)" }
+            .joined(separator: separator)
     }
 
     func copySelectedRawText() {
@@ -283,8 +311,13 @@ final class ClipStore: ObservableObject {
         isExporting = true
         let title = spaceTitle
         let dir = URL(fileURLWithPath: settings.exportDirectory, isDirectory: true)
+        let userName = settings.userDisplayName
+        let assistantName = settings.assistantDisplayName
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { try SpaceHTMLGenerator.writeSpace(clips: selected, title: title, exportDirectory: dir) }
+            let result = Result {
+                try SpaceHTMLGenerator.writeSpace(clips: selected, title: title, exportDirectory: dir,
+                                                  userName: userName, assistantName: assistantName)
+            }
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isExporting = false
